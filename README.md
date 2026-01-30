@@ -34,7 +34,7 @@ JavaScript (Lógica de juego)
 PeerJS (Conectividad online)
 
 Instrucciones para el usuario
-Clona o descarga el archivo jugos.html.
+Clona o descarga el archivo Distorsion-chess.html.
 
 Ábrelo en cualquier navegador moderno.
 
