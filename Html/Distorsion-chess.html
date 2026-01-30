@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distortion Chess - Final Version</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root {
+            --tamano-casilla: 50px;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #050505; 
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        .contenedor-juego { display: flex; align-items: center; gap: 30px; }
+
+        /* --- UI TRACKER (MONEDA) --- */
+        #tracker {
+            display: grid;
+            grid-template-columns: 60px;
+            grid-template-rows: repeat(3, 60px);
+            background-color: transparent;
+            gap: 10px;
+        }
+        .casilla-tracker {
+            width: 60px; height: 60px; 
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .moneda {
+            width: 50px; height: 50px; 
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            filter: drop-shadow(0 0 5px #ffd700);
+            animation: flotarMoneda 2s infinite ease-in-out;
+        }
+        @keyframes flotarMoneda { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+        /* --- TABLERO PRINCIPAL --- */
+        .layout-principal { display: none; align-items: center; gap: 30px; }
+        .columna-central { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+
+        #indicador-turno {
+            background-color: #333; padding: 10px 40px; border-radius: 8px; font-size: 24px;
+            font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
+            border: 2px solid #555; min-width: 200px; text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        .turno-blancas { background: #e0e0e0; color: #000; border-color: #fff; }
+        .turno-negras { background: #1a1a1a; color: #fff; border-color: #555; }
+
+        #tablero {
+            display: grid; grid-template-columns: repeat(11, var(--tamano-casilla)); grid-template-rows: repeat(11, var(--tamano-casilla));
+            background-color: transparent; 
+            background-size: cover;
+            background-position: center;
+            border: none;
+            gap: 0; 
+            position: relative;
+            transition: transform 1s ease;
+        }
+
+        .rotar-tablero { transform: rotate(180deg); }
+
+        .casilla {
+            width: var(--tamano-casilla); height: var(--tamano-casilla); 
+            display: flex; justify-content: center; align-items: center;
+            box-sizing: border-box; cursor: pointer; user-select: none;
+            position: relative;
+        }
+
+        /* CAPA DE FONDO (ROTACIÓN) */
+        .fondo-tablero {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-repeat: no-repeat;
+            background-size: 150px 150px; 
+            z-index: 0;
+            transition: transform 0.6s ease; 
+        }
+
+        .vacio-espacio {
+            background-color: transparent;
+            cursor: default;
+        }
+
+        /* --- VOID FLOTANTE (Capa Superior Unificada) --- */
+        .void-flotante {
+            position: absolute;
+            width: 150px; height: 150px;
+            background-size: 150px 150px;
+            background-repeat: no-repeat;
+            z-index: 60; /* Por encima de piezas (10) y selección (20) */
+            pointer-events: none; /* Dejar pasar clics si fuera necesario (la lógica del juego bloquea movimiento) */
+            box-shadow: 0 0 25px #000;
+        }
+
+        /* --- PIEZAS --- */
+        .pieza-visual {
+            width: 100%; height: 100%;
+            background-size: contain; 
+            background-repeat: no-repeat;
+            background-position: center;
+            z-index: 10; 
+            filter: drop-shadow(0 0 2px rgba(0,0,0,0.8)); 
+            position: relative;
+        }
+        .pieza-roca-sprite {
+            width: 100%; height: 100%;
+            background-size: cover;
+            background-repeat: no-repeat;
+            z-index: 10;
+            position: relative;
+        }
+
+        /* --- SISTEMA DE FANTASMAS (ANIMACIONES TABLERO) --- */
+        .tablero-fantasma {
+            position: absolute;
+            width: 150px; height: 150px;
+            display: grid;
+            grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(3, 50px);
+            z-index: 100;
+            pointer-events: none;
+            transition: transform 0.5s ease-in-out, opacity 0.3s;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        .casilla-fantasma {
+            width: 50px; height: 50px;
+            position: relative;
+            display: flex; justify-content: center; align-items: center;
+        }
+        
+        .casilla-fantasma .pieza-visual, 
+        .casilla-fantasma .pieza-roca-sprite {
+            width: 100%; height: 100%; z-index: 2;
+            transition: transform 0.5s ease-in-out; 
+        }
+
+        .casilla-fantasma .fondo-tablero {
+            width: 100%; height: 100%; position: absolute; top:0; left:0;
+        }
+        
+        /* Aseguramos que si se clona un tablero void, se vea el void */
+        .casilla-fantasma .void-flotante-clon {
+            position: absolute; top:0; left:0; width: 150px; height: 150px;
+            z-index: 60;
+        }
+
+        /* --- ANIMACIÓN VOID UNIFICADA --- */
+        .animacion-void-unificada {
+            position: absolute; width: 150px; height: 150px;
+            background-size: cover; background-repeat: no-repeat; background-position: center;
+            z-index: 150; transform-origin: center center;
+            transform: scale(0);
+            transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 0 20px #000; border-radius: 5px;
+        }
+        .void-expandido { transform: scale(1) !important; }
+        .void-rotado { transform: scale(0) rotate(180deg); }
+        .void-expandido.void-rotado { transform: scale(1) rotate(180deg) !important; }
+
+
+        /* --- INDICADORES Y RESALTADOS --- */
+        .indicador-movimiento {
+            position: absolute; width: 18px; height: 18px;
+            background-color: #00ff00; border-radius: 50%;
+            box-shadow: 0 0 10px #00ff00; z-index: 15; opacity: 0.8; pointer-events: none;
+        }
+        .indicador-movimiento.enemigo {
+            background-color: #ff0000; box-shadow: 0 0 10px #ff0000;
+        }
+
+        .overlay-seleccion {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 20; pointer-events: none;
+        }
+        
+        /* ÚLTIMO MOVIMIENTO (MORADO) */
+        .ultimo-movimiento {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: inset 0 0 10px #a020f0, 0 0 10px #a020f0;
+            border: 2px solid #a020f0;
+            z-index: 30; pointer-events: none;
+        }
+
+        /* --- LUZ DE JAQUE --- */
+        .casilla-jaque { position: relative; }
+        .casilla-jaque::after {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, rgba(255, 0, 0, 0.8) 20%, transparent 80%);
+            box-shadow: inset 0 0 15px red; animation: latidoJaque 0.8s infinite alternate;
+            z-index: 1; pointer-events: none;
+        }
+        @keyframes latidoJaque {
+            from { opacity: 0.6; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        /* --- DECK Y CARTAS --- */
+        #panel-deck {
+            width: 200px; background: rgba(20, 20, 35, 0.95); border: 2px solid #4444ff; border-radius: 10px;
+            padding: 15px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 0 20px rgba(68, 68, 255, 0.3);
+            z-index: 500;
+        }
+        .titulo-deck { text-align: center; color: #fff; font-weight: bold; border-bottom: 2px solid #4444ff; margin-bottom: 5px; }
+        .contador-evento {
+            background-color: #0d0d16; border: 1px solid #555; border-radius: 5px; padding: 8px;
+            display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #aaa;
+        }
+        .contador-evento.activo { border-color: #ffd700; color: #fff; background: linear-gradient(90deg, #1a1a2e, #2a2a4e); }
+        .contador-evento.agotado { opacity: 0.4; text-decoration: line-through; }
+
+        /* OVERLAYS */
+        .oculto { display: none !important; }
+        #overlay-evento, #overlay-promocion, #overlay-gameover, #menu-online, #overlay-espera-promo {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.92); display: flex; justify-content: center; align-items: center; z-index: 600;
+            backdrop-filter: blur(5px);
+            flex-direction: column;
+        }
+
+        /* --- CARTA COMPLETA --- */
+        .carta-evento {
+            background: transparent; border: none; box-shadow: none; padding: 0;
+            display: flex; flex-direction: column; align-items: center; position: relative;
+        }
+        .visual-carta {
+            width: 320px; height: 448px; 
+            background-repeat: no-repeat;
+            border-radius: 15px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            margin-bottom: 20px;
+            background-size: 200% 200%; 
+        }
+        #titulo-evento, #descripcion-evento { display: none; }
+
+        /* Posiciones Sprite Sheet */
+        .sprite-void { background-position: 0% 0%; }
+        .sprite-swap { background-position: 100% 0%; }
+        .sprite-slide { background-position: 0% 100%; }
+        .sprite-spin { background-position: 100% 100%; }
+
+        /* UI MENUS */
+        button { 
+            cursor: pointer; padding: 15px 30px; font-weight: bold; font-size: 18px; 
+            background: #ffd700; border: none; border-radius: 50px; color: #000;
+            transition: transform 0.1s; box-shadow: 0 5px 15px rgba(0,0,0,0.5); margin: 5px;
+        }
+        button:hover { transform: scale(1.05); background: #fff; }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; transform: none; box-shadow: none; }
+        
+        .btn-secundario {
+            background: transparent; border: 2px solid #555; color: #ccc; font-size: 14px; padding: 10px 20px;
+        }
+        .btn-secundario:hover { background: #333; color: white; border-color: white; }
+
+        #notificacion-evento-min, #notificacion-gameover-min {
+            position: fixed; top: 20px; right: 20px;
+            background: rgba(0,0,0,0.8); border: 2px solid #ffd700;
+            padding: 15px; border-radius: 10px; color: white;
+            z-index: 550; display: none; cursor: pointer;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.3);
+        }
+        #notificacion-gameover-min { top: 80px; border-color: #ff4444; box-shadow: 0 0 15px rgba(255, 68, 68, 0.3); }
+
+        .caja-menu { text-align: center; background: #222; padding: 40px; border-radius: 20px; border: 2px solid #444; }
+        input { padding: 10px; margin: 10px 0; width: 80%; text-align: center; background: #000; color: #fff; border: 1px solid #555; font-size: 20px; letter-spacing: 3px; text-transform: uppercase; }
+
+        .panel-controles { 
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); 
+            background: #222; border: 1px solid #fff; padding: 20px; 
+            z-index: 500;
+            text-align: center; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .panel-controles button { padding: 5px 15px; margin: 0 2px; font-size: 14px; background: #444; color: white; border-radius: 5px; }
+        .panel-controles button:hover { background: #666; }
+
+        #mensaje-sistema { 
+            position: fixed; top: 30px; left: 50%; transform: translateX(-50%); 
+            background: crimson; color: white; padding: 10px 25px; border-radius: 50px; 
+            z-index: 650; display: none; font-weight: bold; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        
+        .panel-promocion { background: #222; padding: 30px; border: 2px solid white; text-align: center; color: white; border-radius: 15px; }
+        .opciones-promocion { display: flex; gap: 10px; margin-top: 20px; justify-content: center;}
+        .btn-promo { 
+            width: 60px; height: 60px; border: 2px solid #555; font-size: 40px; 
+            cursor: pointer; background: #333; display: flex; justify-content: center; align-items: center; border-radius: 8px;
+            background-size: contain; background-repeat: no-repeat; background-position: center;
+        }
+        .btn-promo:hover { background-color: #555; border-color: #fff; }
+
+        .aviso-espera {
+            background: #111; border: 2px solid #ffd700; padding: 40px;
+            text-align: center; border-radius: 20px; color: white;
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.4);
+        }
+        .spinner {
+            border: 4px solid #f3f3f3; border-top: 4px solid #ffd700; border-radius: 50%;
+            width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    </style>
+</head>
+<body>
+
+    <div id="menu-online">
+        <div class="caja-menu">
+            <h1 style="color:#ffd700; margin-top:0;">Distortion Chess</h1>
+            <div id="lobby-inicio">
+                <button onclick="iniciarHost()">CREAR PARTIDA</button>
+                <p style="color:#888">- O -</p>
+                <input type="text" id="input-id-host" placeholder="CÓDIGO (Ej: A1B2)">
+                <br>
+                <button onclick="unirsePartida()">UNIRSE A PARTIDA</button>
+            </div>
+            <div id="lobby-espera" class="oculto">
+                <p>Tu Código de partida:</p>
+                <input type="text" id="mi-id-display" readonly style="color:#ffd700; font-weight:bold; font-size:24px; letter-spacing: 5px;">
+                <p>Esperando oponente...</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="mensaje-sistema"></div>
+    <div id="notificacion-evento-min" onclick="toggleOverlayEvento()">
+        👁️ EVENTO EN PROGRESO (Clic para abrir)
+    </div>
+    <div id="notificacion-gameover-min" onclick="toggleGameOver()">
+        🏆 PARTIDA FINALIZADA (Clic para ver)
+    </div>
+
+    <div class="layout-principal" id="main-layout">
+        <div id="tracker"></div> 
+        
+        <div class="columna-central">
+            <div id="indicador-turno">TURNO</div>
+            <div id="tablero"></div>
+        </div>
+
+        <div id="panel-deck">
+            <div class="titulo-deck">DECK</div>
+            <div id="deck-slide" class="contador-evento activo"><span>SLIDE</span><span id="count-slide">3/3</span></div>
+            <div id="deck-swap" class="contador-evento activo"><span>SWAP</span><span id="count-swap">3/3</span></div>
+            <div id="deck-spin" class="contador-evento activo"><span>SPIN</span><span id="count-spin">3/3</span></div>
+            <div id="deck-void" class="contador-evento activo" style="color:#ffaaaa;"><span>VOID</span><span id="count-void">1/1</span></div>
+        </div>
+    </div>
+
+    <div id="overlay-evento" class="oculto">
+        <div class="carta-evento">
+            <h2 id="titulo-evento">EVENTO</h2>
+            <div id="visual-carta" class="visual-carta"></div>
+            <p id="descripcion-evento"></p>
+            <div>
+                <button id="btn-usar-carta" onclick="cerrarEventoYActivarModo()">ACTIVAR CARTA</button>
+                <button id="btn-minimizar-evento" class="btn-secundario oculto" onclick="toggleOverlayEvento()">Ver Tablero</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="overlay-promocion" class="oculto">
+        <div class="panel-promocion">
+            <h2 style="margin-top:0;">¡PROMOCIÓN!</h2>
+            <p>Elige una pieza:</p>
+            <div id="opciones-promo-container" class="opciones-promocion"></div>
+        </div>
+    </div>
+
+    <div id="overlay-espera-promo" class="oculto">
+        <div class="aviso-espera">
+            <h2>ESPERANDO AL OPONENTE</h2>
+            <p>El otro jugador está eligiendo pieza de promoción...</p>
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <div id="overlay-gameover" class="oculto">
+        <div class="panel-promocion">
+            <h1 id="texto-victoria" style="color:#ffd700; font-size:40px;">FIN</h1>
+            <p id="subtitulo-victoria" style="font-size:18px; margin-bottom:20px;"></p>
+            <button onclick="location.reload()">VOLVER AL MENÚ</button>
+            <button class="btn-secundario" onclick="toggleGameOver()">VER TABLERO</button>
+        </div>
+    </div>
+
+    <div id="controles-slide" class="panel-controles oculto">
+        <h3>SLIDE</h3>
+        <button onclick="ejecutarSlide('ARRIBA')">⬆</button><button onclick="ejecutarSlide('ABAJO')">⬇</button>
+        <button onclick="ejecutarSlide('IZQUIERDA')">⬅</button><button onclick="ejecutarSlide('DERECHA')">➡</button>
+        <br><button onclick="reiniciarSeleccion()" style="margin-top:10px; background:#622;">Cancelar</button>
+    </div>
+    <div id="controles-spin" class="panel-controles oculto">
+        <h3>SPIN</h3>
+        <button onclick="ejecutarSpin('ANTIHORARIO')">↺ -90°</button><button onclick="ejecutarSpin('HORARIO')">↻ +90°</button>
+        <br><button onclick="reiniciarSeleccion()" style="margin-top:10px; background:#622;">Cancelar</button>
+    </div>
+    <div id="controles-swap" class="panel-controles oculto">
+        <h3>SWAP</h3><p style="font-size:12px">Selecciona el segundo tablero.</p>
+        <button onclick="reiniciarSeleccion()" style="background:#622;">Cancelar</button>
+    </div>
+    <div id="controles-void" class="panel-controles oculto">
+        <h3>VOID</h3><p style="font-size:12px">Selecciona tablero a anular.</p>
+        <button onclick="reiniciarSeleccion()" style="background:#622;">Cancelar</button>
+    </div>
+
+    <script>
+    const ASSETS = {
+        fondoGlobal: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablerovacio.png",
+        texturaVoid: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/vacio.png", 
+        roca: "https://upload.wikimedia.org/wikipedia/commons/c/ca/1x1.png", 
+        tableros: {
+            0: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero1.png", 
+            1: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero23.png",
+            2: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero23.png",
+            3: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero4.png",
+            4: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero5.png",
+            5: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero6.png",
+            6: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero78.png",
+            7: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero78.png",
+            8: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/tablero9.png",
+        },
+        sheetEventos: "https://github.com/amadeus177153/distortion-chess/blob/bbdb2fefcae83506731d7d5cfe3a9fe24939988b/Assets/eventos.png", 
+        slotMoneda: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/monedaturnos.png", 
+        moneda: "https://github.com/amadeus177153/distortion-chess/blob/2ecaaf1fa4b57ffffb44cd5978d6d7d4707d65ae/Assets/moneda.png",
+        piezas: {
+            blancas: {
+                p: "https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg",
+                t: "https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg",
+                c: "https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg",
+                a: "https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg",
+                d: "https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg",
+                r: "https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg"
+            },
+            negras: {
+                p: "https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg",
+                t: "https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg",
+                c: "https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg",
+                a: "https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg",
+                d: "https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg",
+                r: "https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg"
+            }
+        }
+    };
+
+    let peer = null, conn = null, miColor = null;
+    const PREFIX_JUEGO = "dc_v2_"; 
+    
+    const tableroHTML = document.getElementById('tablero');
+    const tracker = document.getElementById('tracker');
+    const overlayEvento = document.getElementById('overlay-evento');
+    const visualCarta = document.getElementById('visual-carta');
+    const btnUsarCarta = document.getElementById('btn-usar-carta');
+    const btnMinimizar = document.getElementById('btn-minimizar-evento');
+    const notificacionMin = document.getElementById('notificacion-evento-min');
+    const mensajeSistema = document.getElementById('mensaje-sistema');
+    
+    const controlesSlide = document.getElementById('controles-slide');
+    const controlesSpin = document.getElementById('controles-spin');
+    const controlesSwap = document.getElementById('controles-swap');
+    const controlesVoid = document.getElementById('controles-void');
+    const overlayPromocion = document.getElementById('overlay-promocion');
+    const contenedorOpcionesPromo = document.getElementById('opciones-promo-container');
+    const overlayGameOver = document.getElementById('overlay-gameover');
+    const overlayEsperaPromo = document.getElementById('overlay-espera-promo');
+
+    const TAMANO_TABLERO = 11; 
+    let turnoActual = 'BLANCAS';
+    let seleccion = null, enJaque = false, posicionMoneda = 2, modoJuego = 'NORMAL', juegoTerminado = false;
+    let jugadorEvento = null, eventoPendiente = null, promocionPendiente = null, colaPromociones = [];
+    let promocionDesdeEvento = false, tableroVoidID = null, enPassantTarget = null;
+    let seleccionSlide = null, seleccionSpin = null, seleccionSwap1 = null;
+    let ultimoMovimiento = null; 
+
+    let deckState = { SLIDE: 3, SWAP: 3, SPIN: 3, VOID: 1 };
+    
+    let animando = false; 
+
+    const P = {
+        BLANCAS: { T: '♖', C: '♘', A: '♗', R: '♔', D: '♕', P: '♙' },
+        NEGRAS:  { T: '♜', C: '♞', A: '♝', R: '♚', D: '♛', P: '♟' },
+        ROCA: '🪨', VACIO: ''
+    };
+
+    function crearHistorialVacio() { return [[false,false,false],[false,false,false],[false,false,false]]; }
+    
+    function generarTablerosIniciales() {
+        return [
+            { id: 0, rotacion: 0, piezas: [[P.ROCA, P.NEGRAS.T, P.NEGRAS.C], [P.VACIO, P.NEGRAS.P, P.NEGRAS.P], [P.VACIO, P.VACIO, P.VACIO]], matriz: [[1,0,1], [0,1,0], [1,0,1]], historial: crearHistorialVacio() },
+            { id: 1, rotacion: 0, piezas: [[P.NEGRAS.A, P.NEGRAS.R, P.NEGRAS.D], [P.NEGRAS.P, P.NEGRAS.P, P.NEGRAS.P], [P.VACIO, P.VACIO, P.VACIO]], matriz: [[0,1,0], [1,0,1], [0,1,0]], historial: crearHistorialVacio() },
+            { id: 2, rotacion: 0, piezas: [[P.NEGRAS.A, P.NEGRAS.C, P.NEGRAS.T], [P.NEGRAS.P, P.NEGRAS.P, P.NEGRAS.P], [P.VACIO, P.VACIO, P.VACIO]], matriz: [[1,0,1], [0,1,0], [1,0,1]], historial: crearHistorialVacio() },
+            { id: 3, rotacion: 0, piezas: [[P.VACIO, P.VACIO, P.VACIO], [P.ROCA, P.VACIO, P.VACIO], [P.VACIO, P.VACIO, P.VACIO]], matriz: [[0,1,0], [1,0,1], [0,1,0]], historial: crearHistorialVacio() },
+            { id: 4, rotacion: 0, piezas: [[P.VACIO, P.ROCA,  P.VACIO], [P.VACIO,  P.VACIO, P.VACIO], [P.VACIO, P.ROCA,  P.VACIO]], matriz: [[1,0,1], [0,1,0], [1,0,1]], historial: crearHistorialVacio() },
+            { id: 5, rotacion: 0, piezas: [[P.VACIO, P.VACIO, P.VACIO], [P.VACIO, P.VACIO, P.ROCA], [P.VACIO, P.VACIO, P.VACIO]], matriz: [[0,1,0], [1,0,1], [0,1,0]], historial: crearHistorialVacio() },
+            { id: 6, rotacion: 0, piezas: [[P.VACIO, P.VACIO, P.VACIO], [P.BLANCAS.P, P.BLANCAS.P, P.BLANCAS.P], [P.BLANCAS.T, P.BLANCAS.C, P.BLANCAS.A]], matriz: [[1,0,1], [0,1,0], [1,0,1]], historial: crearHistorialVacio() },
+            { id: 7, rotacion: 0, piezas: [[P.VACIO, P.VACIO, P.VACIO], [P.BLANCAS.P, P.BLANCAS.P, P.BLANCAS.P], [P.BLANCAS.D, P.BLANCAS.R, P.BLANCAS.A]], matriz: [[0,1,0], [1,0,1], [0,1,0]], historial: crearHistorialVacio() },
+            { id: 8, rotacion: 0, piezas: [[P.VACIO, P.VACIO, P.VACIO], [P.BLANCAS.P, P.BLANCAS.P, P.VACIO], [P.BLANCAS.C, P.BLANCAS.T, P.ROCA]], matriz: [[1,0,1], [0,1,0], [1,0,1]], historial: crearHistorialVacio() },
+        ];
+    }
+    
+    function generarPosicionesIniciales() {
+        return [
+            { id: 0, r: 1, c: 1 }, { id: 1, r: 1, c: 4 }, { id: 2, r: 1, c: 7 },
+            { id: 3, r: 4, c: 1 }, { id: 4, r: 4, c: 4 }, { id: 5, r: 4, c: 7 },
+            { id: 6, r: 7, c: 1 }, { id: 7, r: 7, c: 4 }, { id: 8, r: 7, c: 7 }
+        ];
+    }
+
+    let CONFIGURACION_TABLEROS = generarTablerosIniciales();
+    let estadoTableros = generarPosicionesIniciales();
+    let tablerosConRey = Array(9).fill(null).map(()=>[]);
+    let vecinosTableros = [];
+
+    // --- GENERADOR DE ID CORTO ---
+    function generarIDCorto() {
+        const caracteres = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789"; 
+        let resultado = "";
+        for (let i = 0; i < 4; i++) {
+            resultado += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
+        }
+        return resultado;
+    }
+
+    function iniciarHost() {
+        document.getElementById('lobby-inicio').classList.add('oculto');
+        document.getElementById('lobby-espera').classList.remove('oculto');
+        miColor = 'BLANCAS';
+        const idCorto = generarIDCorto();
+        const idReal = PREFIX_JUEGO + idCorto;
+        peer = new Peer(idReal); 
+        peer.on('open', id => document.getElementById('mi-id-display').value = id.replace(PREFIX_JUEGO, ''));
+        peer.on('connection', c => { conn = c; configurarConexion(); comenzarJuegoUI(); });
+        peer.on('error', err => {
+            if (err.type === 'unavailable-id') { peer.destroy(); iniciarHost(); } else { alert("Error de conexión: " + err.type); }
+        });
+    }
+    
+    function unirsePartida() {
+        const idInput = document.getElementById('input-id-host').value.toUpperCase().trim();
+        if(!idInput) return alert("Introduce ID");
+        miColor = 'NEGRAS';
+        peer = new Peer(); 
+        peer.on('open', () => { 
+            conn = peer.connect(PREFIX_JUEGO + idInput); 
+            configurarConexion(); 
+            comenzarJuegoUI(); 
+        });
+        peer.on('error', err => alert("No se encontró la partida o error de conexión."));
+    }
+    function configurarConexion() {
+        conn.on('data', data => procesarDatosRemotos(data));
+        conn.on('open', () => console.log("Conectado"));
+    }
+    function enviarDatos(tipo, payload) { if(conn && conn.open) conn.send({type: tipo, payload: payload}); }
+    
+    function comenzarJuegoUI() {
+        document.getElementById('menu-online').classList.add('oculto');
+        document.getElementById('main-layout').style.display = 'flex';
+        if(miColor === 'NEGRAS') tableroHTML.classList.add('rotar-tablero');
+        resetearJuego();
+    }
+
+    // ==========================================
+    // 1. SINCRONIZACIÓN REMOTA STRICTA
+    // ==========================================
+
+    function procesarDatosRemotos(data) {
+        if(data.type !== 'CARD_EVENT') {
+            overlayEvento.classList.add('oculto');
+            if(notificacionMin) notificacionMin.style.display = 'none';
+        }
+
+        switch(data.type) {
+            case 'MOVE':
+                const m = data.payload;
+                animarMovimiento(m.fOri, m.cOri, m.fDest, m.cDest, () => {
+                    ejecutarMovimientoFisico(m.fOri, m.cOri, m.fDest, m.cDest, m.pieza);
+                    if (verificarPromocion(m.pieza, m.fDest, m.cDest)) {
+                        overlayEsperaPromo.classList.remove('oculto');
+                    } else {
+                        continuarFinTurno(true);
+                    }
+                });
+                break;
+
+            case 'PROMOTE': 
+                const p = data.payload;
+                promocionPendiente = { f: p.f, c: p.c }; 
+                if(colaPromociones.length>0) colaPromociones.shift();
+                realizarPromocion(p.pieza, true);
+                overlayEsperaPromo.classList.add('oculto');
+                break;
+
+            case 'CARD_EVENT': 
+                if (data.payload.resetDeck) {
+                    deckState = {SLIDE:3, SWAP:3, SPIN:3, VOID:1};
+                    mostrarMensaje("BARAJA REINICIADA");
+                }
+                deckState[data.payload.evento]--; 
+                tableroVoidID = null; 
+                actualizarUIDeck(); 
+                mostrarCartaForzada(data.payload.jugador, data.payload.evento); 
+                crearTablero();
+                break;
+
+            // ANIMACIONES: PASAMOS 'true' (esRemoto) Y NO ACTUALIZAMOS LÓGICA AQUÍ
+            case 'SLIDE': 
+                seleccionSlide = data.payload.id; 
+                ejecutarSlide(data.payload.dir, true); 
+                break;
+            case 'SPIN': 
+                seleccionSpin = data.payload.id; 
+                ejecutarSpin(data.payload.sentido, true); 
+                break;
+            case 'SWAP': 
+                ejecutarSwap(data.payload.id1, data.payload.id2, true); 
+                break;
+            case 'VOID': 
+                manejarClicVoid(data.payload.id, true); 
+                break;
+        }
+    }
+
+    // ==========================================
+    // SISTEMA DE ANIMACIONES (FANTASMAS Y PIEZAS)
+    // ==========================================
+
+    function animarMovimiento(fOri, cOri, fDest, cDest, onComplete) {
+        animando = true;
+        const index = fOri * 11 + cOri;
+        const casillas = document.querySelectorAll('.casilla');
+        const casillaOrigen = casillas[index];
+        const piezaDiv = casillaOrigen ? casillaOrigen.querySelector('.pieza-visual, .pieza-roca-sprite') : null;
+
+        if (!piezaDiv) {
+            animando = false;
+            if (onComplete) onComplete();
+            return;
+        }
+
+        let deltaF = fDest - fOri;
+        let deltaC = cDest - cOri;
+
+        if (miColor === 'NEGRAS') {
+            deltaF *= -1;
+            deltaC *= -1;
+        }
+
+        const pixelY = deltaF * 50; 
+        const pixelX = deltaC * 50;
+
+        const rotacionActual = (miColor === 'NEGRAS') ? 'rotate(180deg)' : '';
+
+        piezaDiv.style.transition = "transform 0.2s ease-in-out";
+        piezaDiv.style.transform = `${rotacionActual} translate(${pixelX}px, ${pixelY}px)`;
+        piezaDiv.style.zIndex = "100";
+
+        setTimeout(() => {
+            animando = false;
+            if (onComplete) onComplete();
+        }, 200);
+    }
+
+    // Crea un clon visual LIMPIO (sin selectores)
+    function crearFantasmaVisual(idTablero) {
+        const tState = estadoTableros.find(t => t.id === idTablero);
+        const fantasma = document.createElement('div');
+        fantasma.className = 'tablero-fantasma';
+        
+        const left = tState.c * 50; 
+        const top = tState.r * 50;
+
+        fantasma.style.left = left + 'px';
+        fantasma.style.top = top + 'px';
+
+        for(let r=0; r<3; r++) {
+            for(let c=0; c<3; c++) {
+                const filaGlobal = tState.r + r;
+                const colGlobal = tState.c + c;
+                const index = filaGlobal * 11 + colGlobal;
+                const casillaReal = tableroHTML.children[index];
+                
+                const celdaFantasma = document.createElement('div');
+                celdaFantasma.className = 'casilla-fantasma';
+                
+                if (casillaReal) {
+                    // Si el tablero original es Void, clonamos el void
+                    // Pero como ahora el void es flotante, la celda real está vacía.
+                    // Necesitamos clonar el void flotante si coincide.
+                    // Para simplificar, si es un tablero void, agregamos una capa visual
+                    if (tState.id === tableroVoidID && r===1 && c===1) {
+                         const voidElem = document.createElement('div');
+                         voidElem.className = 'void-flotante-clon';
+                         voidElem.style.backgroundImage = `url('${ASSETS.texturaVoid}')`;
+                         voidElem.style.backgroundSize = '150px 150px';
+                         if (miColor === 'NEGRAS') voidElem.style.transform = 'rotate(180deg)';
+                         // Ajuste de posición: el fantasma es celda por celda, el void cubre 3x3.
+                         // Posicionamos relativo al centro
+                         voidElem.style.top = '-50px'; voidElem.style.left = '-50px';
+                         celdaFantasma.appendChild(voidElem);
+                    } else {
+                        // Clonar SOLO fondo y pieza si no es Void
+                        const fondo = casillaReal.querySelector('.fondo-tablero');
+                        if(fondo) celdaFantasma.appendChild(fondo.cloneNode(true));
+
+                        const pieza = casillaReal.querySelector('.pieza-visual, .pieza-roca-sprite');
+                        if(pieza) {
+                            const piezaClon = pieza.cloneNode(true);
+                            celdaFantasma.appendChild(piezaClon);
+                        }
+                    }
+                    casillaReal.style.opacity = '0'; // Ocultar original
+                }
+                fantasma.appendChild(celdaFantasma);
+            }
+        }
+        
+        tableroHTML.appendChild(fantasma);
+        return { elemento: fantasma, estado: tState };
+    }
+
+    function ejecutarSwap(id1, id2, esRemoto=false) {
+        if(!esRemoto) enviarDatos('SWAP', {id1, id2});
+        
+        animando = true;
+        const f1 = crearFantasmaVisual(id1);
+        const f2 = crearFantasmaVisual(id2);
+
+        const destLeft1 = f2.elemento.style.left;
+        const destTop1 = f2.elemento.style.top;
+        const destLeft2 = f1.elemento.style.left;
+        const destTop2 = f1.elemento.style.top;
+
+        requestAnimationFrame(() => {
+            f1.elemento.style.transform = `translate(${parseInt(destLeft1) - parseInt(destLeft2)}px, ${parseInt(destTop1) - parseInt(destTop2)}px)`;
+            f2.elemento.style.transform = `translate(${parseInt(destLeft2) - parseInt(destLeft1)}px, ${parseInt(destTop2) - parseInt(destTop1)}px)`;
+            f1.elemento.style.zIndex = 101;
+            f2.elemento.style.zIndex = 101;
+        });
+
+        setTimeout(() => {
+            const t1 = estadoTableros.find(t=>t.id===id1);
+            const t2 = estadoTableros.find(t=>t.id===id2);
+            const tempR = t1.r, tempC = t1.c; t1.r=t2.r; t1.c=t2.c; t2.r=tempR; t2.c=tempC;
+
+            f1.elemento.remove();
+            f2.elemento.remove();
+            animando = false;
+            finalizarEvento(esRemoto);
+        }, 500); 
+    }
+    
+    function ejecutarSpin(sentido, esRemoto=false) {
+        if(!esRemoto) enviarDatos('SPIN', {id: seleccionSpin, sentido});
+        
+        animando = true;
+        const fantasmaObj = crearFantasmaVisual(seleccionSpin);
+        const grados = sentido === 'HORARIO' ? 90 : -90;
+
+        const piezasInternas = fantasmaObj.elemento.querySelectorAll('.pieza-visual, .pieza-roca-sprite');
+        const rotacionBasePieza = (miColor === 'NEGRAS') ? 180 : 0;
+
+        requestAnimationFrame(() => {
+            fantasmaObj.elemento.style.transform = `rotate(${grados}deg)`;
+            piezasInternas.forEach(p => {
+                const contragiro = rotacionBasePieza - grados;
+                p.style.transform = `rotate(${contragiro}deg)`;
+            });
+        });
+
+        setTimeout(() => {
+            const c = CONFIGURACION_TABLEROS[seleccionSpin];
+            const rotar = (m) => {
+                let n = [[],[],[]];
+                for(let i=0; i<3; i++) for(let j=0; j<3; j++) n[i][j] = (sentido === 'HORARIO') ? m[2-j][i] : m[j][2-i];
+                return n;
+            };
+            c.piezas = rotar(c.piezas); c.matriz = rotar(c.matriz); c.historial = rotar(c.historial);
+            if (sentido === 'HORARIO') c.rotacion = (c.rotacion + 90) % 360;
+            else c.rotacion = (c.rotacion - 90 + 360) % 360;
+
+            fantasmaObj.elemento.remove();
+            animando = false;
+            finalizarEvento(esRemoto);
+        }, 500);
+    }
+
+    function manejarClicVoid(id, esRemoto=false) {
+        if(!esRemoto && tablerosConRey[id].length > 0) return mostrarMensaje("¡Hay Reyes!");
+        if(!esRemoto) enviarDatos('VOID', {id});
+        
+        animando = true;
+        
+        const voidSprite = document.createElement('div');
+        voidSprite.className = 'animacion-void-unificada';
+        voidSprite.style.backgroundImage = `url('${ASSETS.texturaVoid}')`;
+        
+        const tState = estadoTableros.find(t => t.id === id);
+        const left = tState.c * 50; 
+        const top = tState.r * 50;
+        voidSprite.style.left = left + 'px';
+        voidSprite.style.top = top + 'px';
+
+        if (miColor === 'NEGRAS') {
+            voidSprite.classList.add('void-rotado');
+        }
+
+        tableroHTML.appendChild(voidSprite);
+
+        requestAnimationFrame(() => {
+            voidSprite.classList.add('void-expandido');
+        });
+
+        setTimeout(() => {
+            tableroVoidID = id;
+            voidSprite.remove();
+            animando = false;
+            finalizarEvento(esRemoto); 
+        }, 600); 
+    }
+
+    function ejecutarSlide(dir, esRemoto=false) {
+        if (seleccionSlide === null && !esRemoto) return;
+        
+        let dirReal = dir;
+        if (!esRemoto && miColor === 'NEGRAS') {
+             if (dir === 'ARRIBA') dirReal = 'ABAJO';
+             else if (dir === 'ABAJO') dirReal = 'ARRIBA';
+             else if (dir === 'IZQUIERDA') dirReal = 'DERECHA';
+             else if (dir === 'DERECHA') dirReal = 'IZQUIERDA';
+        }
+
+        let dr=0, dc=0;
+        if(dirReal==='ARRIBA') dr=-1; 
+        if(dirReal==='ABAJO') dr=1; 
+        if(dirReal==='IZQUIERDA') dc=-1; 
+        if(dirReal==='DERECHA') dc=1;
+
+        let tablerosAMover = [estadoTableros.find(t => t.id === seleccionSlide)];
+        let procesados = new Set([seleccionSlide]);
+        let i = 0; let posible = true;
+        while(i < tablerosAMover.length) {
+            let t = tablerosAMover[i];
+            let nr = t.r + dr; let nc = t.c + dc;
+            if (nr < 0 || nr > 8 || nc < 0 || nc > 8) { posible = false; break; }
+            for (let otro of estadoTableros) {
+                if (procesados.has(otro.id)) continue;
+                if (!((nr + 3 <= otro.r) || (nr >= otro.r + 3) || (nc + 3 <= otro.c) || (nc >= otro.c + 3))) {
+                    tablerosAMover.push(otro); procesados.add(otro.id);
+                    if (tablerosAMover.length > 4) { posible = false; break; } 
+                }
+            }
+            if (!posible) break;
+            i++;
+        }
+
+        if (!posible) {
+            if(!esRemoto) mostrarMensaje("¡Movimiento Bloqueado!");
+            return;
+        }
+
+        if(!esRemoto) enviarDatos('SLIDE', {id: seleccionSlide, dir: dirReal});
+        
+        animando = true;
+        let fantasmas = [];
+        tablerosAMover.forEach(t => { fantasmas.push(crearFantasmaVisual(t.id)); });
+
+        requestAnimationFrame(() => {
+            fantasmas.forEach(obj => {
+                const pixelX = dc * 50;
+                const pixelY = dr * 50;
+                obj.elemento.style.transform = `translate(${pixelX}px, ${pixelY}px)`;
+            });
+        });
+
+        setTimeout(() => {
+            for (let t of tablerosAMover) { t.r += dr; t.c += dc; }
+            
+            fantasmas.forEach(obj => obj.elemento.remove());
+            controlesSlide.classList.add('oculto');
+            animando = false;
+            finalizarEvento(esRemoto);
+        }, 500);
+    }
+
+    // ==========================================
+    // LOGICA PRINCIPAL JUEGO
+    // ==========================================
+
+    function toggleOverlayEvento() {
+        if(overlayEvento.classList.contains('oculto')) {
+            overlayEvento.classList.remove('oculto');
+            notificacionMin.style.display = 'none';
+        } else {
+            overlayEvento.classList.add('oculto');
+            notificacionMin.style.display = 'block';
+        }
+    }
+    
+    function toggleGameOver() {
+        const overlay = document.getElementById('overlay-gameover');
+        const notif = document.getElementById('notificacion-gameover-min');
+        if (overlay.classList.contains('oculto')) {
+            overlay.classList.remove('oculto');
+            notif.style.display = 'none';
+        } else {
+            overlay.classList.add('oculto');
+            notif.style.display = 'block';
+        }
+    }
+
+    function mostrarCartaForzada(jugador, evento) {
+        eventoPendiente = evento;
+        jugadorEvento = jugador;
+        
+        visualCarta.style.backgroundImage = `url('${ASSETS.sheetEventos}')`; 
+        visualCarta.className = 'visual-carta'; 
+        visualCarta.classList.add(`sprite-${evento.toLowerCase()}`);
+
+        overlayEvento.classList.remove('oculto');
+        notificacionMin.style.display = 'none';
+
+        if (jugador === miColor) {
+            btnUsarCarta.disabled = false; btnUsarCarta.innerText = "ACTIVAR CARTA"; btnUsarCarta.style.opacity = "1";
+            btnMinimizar.classList.add('oculto'); 
+        } else {
+            btnUsarCarta.disabled = true; btnUsarCarta.innerText = "ESPERANDO OPONENTE..."; btnUsarCarta.style.opacity = "0.5";
+            btnMinimizar.classList.remove('oculto'); 
+        }
+    }
+
+    function dibujarTracker() {
+        tracker.innerHTML = '';
+        for (let i = 0; i < 3; i++) {
+            const casilla = document.createElement('div');
+            casilla.className = 'casilla-tracker';
+            casilla.style.backgroundImage = `url('${ASSETS.slotMoneda}')`; 
+
+            if (i === posicionMoneda) {
+                const moneda = document.createElement('div');
+                moneda.className = 'moneda';
+                moneda.style.backgroundImage = `url('${ASSETS.moneda}')`;
+                casilla.appendChild(moneda);
+            }
+            tracker.appendChild(casilla);
+        }
+    }
+
+    tableroHTML.style.backgroundImage = `url('${ASSETS.fondoGlobal}')`;
+
+    function obtenerUrlPieza(charPieza) {
+        if (charPieza === P.BLANCAS.P) return ASSETS.piezas.blancas.p;
+        if (charPieza === P.BLANCAS.T) return ASSETS.piezas.blancas.t;
+        if (charPieza === P.BLANCAS.C) return ASSETS.piezas.blancas.c;
+        if (charPieza === P.BLANCAS.A) return ASSETS.piezas.blancas.a;
+        if (charPieza === P.BLANCAS.D) return ASSETS.piezas.blancas.d;
+        if (charPieza === P.BLANCAS.R) return ASSETS.piezas.blancas.r;
+        if (charPieza === P.NEGRAS.P) return ASSETS.piezas.negras.p;
+        if (charPieza === P.NEGRAS.T) return ASSETS.piezas.negras.t;
+        if (charPieza === P.NEGRAS.C) return ASSETS.piezas.negras.c;
+        if (charPieza === P.NEGRAS.A) return ASSETS.piezas.negras.a;
+        if (charPieza === P.NEGRAS.D) return ASSETS.piezas.negras.d;
+        if (charPieza === P.NEGRAS.R) return ASSETS.piezas.negras.r;
+        return "";
+    }
+
+    function crearTablero() {
+        tableroHTML.innerHTML = ''; 
+        const posReyActual = encontrarRey(turnoActual);
+        const bandoEnemigo = turnoActual === 'BLANCAS' ? 'NEGRAS' : 'BLANCAS';
+        let jaqueVisual = posReyActual ? esCasillaAtacada(posReyActual.f, posReyActual.c, bandoEnemigo) : false;
+
+        for (let fila = 0; fila < TAMANO_TABLERO; fila++) {
+            for (let col = 0; col < TAMANO_TABLERO; col++) {
+                const casilla = document.createElement('div');
+                casilla.classList.add('casilla');
+                
+                const datos = accederDatosTablero(fila, col);
+                
+                if (datos) {
+                    const tamanoC = 50; 
+                    const posX = -(datos.c * tamanoC);
+                    const posY = -(datos.f * tamanoC);
+
+                    if (datos.isVoid) {
+                        // --- VOID FLOTANTE ---
+                        // No renderizamos nada dentro de la celda para evitar cortes.
+                        casilla.classList.add('vacio-espacio');
+                    } else {
+                        // TABLERO NORMAL
+                        const fondoDiv = document.createElement('div');
+                        fondoDiv.className = 'fondo-tablero';
+                        fondoDiv.style.backgroundImage = `url('${ASSETS.tableros[datos.idTablero]}')`;
+                        
+                        let rot = datos.config.rotacion || 0;
+                        let srcR = datos.f, srcC = datos.c;
+                        
+                        if (rot === 90) { srcR = 2 - datos.c; srcC = datos.f; }
+                        else if (rot === 180) { srcR = 2 - datos.f; srcC = 2 - datos.c; }
+                        else if (rot === 270) { srcR = datos.c; srcC = 2 - datos.f; }
+                        
+                        const bgX = -(srcC * 50);
+                        const bgY = -(srcR * 50);
+                        
+                        fondoDiv.style.backgroundPosition = `${bgX}px ${bgY}px`;
+                        fondoDiv.style.transform = `rotate(${rot}deg)`;
+                        casilla.appendChild(fondoDiv); 
+
+                        // RENDERIZAR PIEZA
+                        const pieza = datos.config.piezas[datos.f][datos.c];
+                        if (pieza !== P.VACIO) {
+                            const divPieza = document.createElement('div');
+                            
+                            if (jaqueVisual && posReyActual && posReyActual.f === fila && posReyActual.c === col) {
+                                casilla.classList.add('casilla-jaque');
+                            }
+
+                            if (pieza === P.ROCA) {
+                                divPieza.className = 'pieza-roca-sprite';
+                                divPieza.style.backgroundImage = `url('${ASSETS.roca}')`;
+                            } else {
+                                divPieza.className = 'pieza-visual';
+                                const urlPieza = obtenerUrlPieza(pieza);
+                                divPieza.style.backgroundImage = `url('${urlPieza}')`;
+                                if(miColor === 'NEGRAS') divPieza.style.transform = 'rotate(180deg)';
+                            }
+                            casilla.appendChild(divPieza);
+                        }
+                    }
+
+                    // --- OVERLAY DE SELECCIÓN ---
+                    let highlightColor = null;
+                    if (modoJuego === 'EVENTO_SWAP_2' && datos.idTablero === seleccionSwap1) highlightColor = 'blue';
+                    if (modoJuego === 'EVENTO_SPIN' && datos.idTablero === seleccionSpin) highlightColor = 'yellow';
+                    if (modoJuego === 'EVENTO_SLIDE' && datos.idTablero === seleccionSlide) highlightColor = 'orange';
+
+                    if (highlightColor) {
+                        const sel = document.createElement('div');
+                        sel.className = 'overlay-seleccion';
+                        sel.style.boxShadow = `inset 0 0 15px ${highlightColor}, 0 0 10px ${highlightColor}`;
+                        sel.style.border = `2px solid ${highlightColor}`;
+                        casilla.appendChild(sel);
+                    }
+                    
+                    // --- ÚLTIMO MOVIMIENTO (MORADO) ---
+                    if (ultimoMovimiento && ((fila === ultimoMovimiento.fOri && col === ultimoMovimiento.cOri) || (fila === ultimoMovimiento.fDest && col === ultimoMovimiento.cDest))) {
+                        const highlight = document.createElement('div');
+                        highlight.className = 'ultimo-movimiento';
+                        casilla.appendChild(highlight);
+                    }
+
+                } else { 
+                    casilla.classList.add('vacio-espacio'); 
+                }
+                
+                const logF = fila, logC = col;
+                casilla.onclick = () => manejarClic(logF, logC);
+                
+                // HIGHLIGHTS DE MOVIMIENTO PIEZA
+                if (seleccion && seleccion.fila === logF && seleccion.col === logC) casilla.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';
+                if (seleccion) {
+                    const move = seleccion.movimientos.find(m => m.f === logF && m.c === logC);
+                    if (move) { 
+                        const indicador = document.createElement('div');
+                        indicador.className = 'indicador-movimiento';
+                        if (!esPiezaDelTurno(seleccion.pieza, miColor)) {
+                            indicador.classList.add('enemigo');
+                        }
+                        casilla.appendChild(indicador);
+                        casilla.style.cursor = 'pointer'; 
+                    }
+                }
+                tableroHTML.appendChild(casilla);
+            }
+        }
+        
+        // RENDERIZADO DEL VOID FLOTANTE (SUPERPUESTO)
+        if (tableroVoidID !== null) {
+            const tState = estadoTableros.find(t => t.id === tableroVoidID);
+            if (tState) {
+                const voidDiv = document.createElement('div');
+                voidDiv.className = 'void-flotante';
+                voidDiv.style.backgroundImage = `url('${ASSETS.texturaVoid}')`;
+                const top = tState.r * 50;
+                const left = tState.c * 50;
+                voidDiv.style.top = `${top}px`;
+                voidDiv.style.left = `${left}px`;
+                if (miColor === 'NEGRAS') voidDiv.style.transform = 'rotate(180deg)';
+                tableroHTML.appendChild(voidDiv);
+            }
+        }
+        
+        dibujarTracker();
+    }
+
+    function resetearJuego() {
+        turnoActual = 'BLANCAS'; seleccion = null; enJaque = false; posicionMoneda = 2; modoJuego = 'NORMAL';
+        juegoTerminado = false; tableroVoidID = null; enPassantTarget = null; colaPromociones = []; promocionDesdeEvento = false;
+        deckState = { SLIDE: 3, SWAP: 3, SPIN: 3, VOID: 1 };
+        animando = false; 
+        ultimoMovimiento = null;
+        
+        CONFIGURACION_TABLEROS = generarTablerosIniciales();
+        estadoTableros = generarPosicionesIniciales();
+        
+        overlayGameOver.classList.add('oculto');
+        overlayEsperaPromo.classList.add('oculto');
+        notificacionMin.style.display = 'none';
+        document.getElementById('notificacion-gameover-min').style.display = 'none';
+        
+        actualizarUIDeck(); actualizarTurnoUI(); actualizarUbicacionReyes(); calcularVecinos();
+        crearTablero(); dibujarTracker();
+    }
+
+    function actualizarUIDeck() {
+        ['slide','swap','spin','void'].forEach(e => {
+            const el = document.getElementById(`deck-${e}`);
+            const count = document.getElementById(`count-${e}`);
+            const val = deckState[e.toUpperCase()];
+            count.innerText = `${val}/${e==='void'?1:3}`;
+            if(val===0) { el.classList.remove('activo'); el.classList.add('agotado'); }
+            else { el.classList.add('activo'); el.classList.remove('agotado'); }
+        });
+    }
+
+    function actualizarTurnoUI() {
+        const ind = document.getElementById('indicador-turno');
+        ind.innerText = `TURNO: ${turnoActual}`;
+        ind.className = turnoActual === 'BLANCAS' ? 'turno-blancas' : 'turno-negras';
+    }
+
+    function accederDatosTablero(fila, col) {
+        if (fila < 0 || fila > 10 || col < 0 || col > 10) return null;
+        for (let t of estadoTableros) {
+            if (fila >= t.r && fila < t.r + 3 && col >= t.c && col < t.c + 3) {
+                return { config: CONFIGURACION_TABLEROS[t.id], f: fila - t.r, c: col - t.c, idTablero: t.id, isVoid: t.id === tableroVoidID };
+            }
+        }
+        return null; 
+    }
+    
+    function obtenerPiezaEn(fila, col) {
+        const datos = accederDatosTablero(fila, col);
+        if (!datos || datos.isVoid) return null;
+        return datos.config.piezas[datos.f][datos.c];
+    }
+    
+    function esPiezaDelTurno(pieza, turno) {
+        if (!pieza || pieza === P.ROCA || pieza === P.VACIO) return false;
+        const blancas = Object.values(P.BLANCAS);
+        return (turno === 'BLANCAS') ? blancas.includes(pieza) : !blancas.includes(pieza);
+    }
+
+    function obtenerMovimientosBase(pieza, f, c) {
+        const movimientos = [];
+        const turnoPieza = Object.values(P.BLANCAS).includes(pieza) ? 'BLANCAS' : 'NEGRAS';
+        const intentar = (nf, nc) => {
+            if (nf < 0 || nf > 10 || nc < 0 || nc > 10) return 'BLOQUEADO';
+            const contenido = obtenerPiezaEn(nf, nc);
+            if (contenido === null) return [P.BLANCAS.D, P.NEGRAS.D].includes(pieza) ? 'SKIP' : 'BLOQUEADO';
+            if (contenido === P.ROCA) return 'BLOQUEADO';
+            if (contenido === P.VACIO) { movimientos.push({f: nf, c: nc}); return 'LIBRE'; }
+            if (!esPiezaDelTurno(contenido, turnoPieza)) { movimientos.push({f: nf, c: nc}); }
+            return 'BLOQUEADO';
+        };
+        
+        if ([P.BLANCAS.T, P.NEGRAS.T, P.BLANCAS.D, P.NEGRAS.D].includes(pieza)) {
+            [[0,1], [0,-1], [1,0], [-1,0]].forEach(([df, dc]) => { for (let i=1; i<11; i++) { if (intentar(f + df*i, c + dc*i) === 'BLOQUEADO') break; } });
+        }
+        if ([P.BLANCAS.A, P.NEGRAS.A, P.BLANCAS.D, P.NEGRAS.D].includes(pieza)) {
+            [[1,1], [1,-1], [-1,1], [-1,-1]].forEach(([df, dc]) => { for (let i=1; i<11; i++) { if (intentar(f + df*i, c + dc*i) === 'BLOQUEADO') break; } });
+        }
+        if ([P.BLANCAS.C, P.NEGRAS.C].includes(pieza)) {
+            [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]].forEach(([df, dc]) => intentar(f+df, c+dc));
+        }
+        if ([P.BLANCAS.R, P.NEGRAS.R].includes(pieza)) {
+            [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([df, dc]) => intentar(f+df, c+dc));
+        }
+        const esBlanca = (turnoPieza === 'BLANCAS');
+        const dir = esBlanca ? -1 : 1;
+        if ([P.BLANCAS.P, P.NEGRAS.P].includes(pieza)) {
+            if (obtenerPiezaEn(f + dir, c) === P.VACIO) {
+                movimientos.push({f: f + dir, c: c});
+                const datos = accederDatosTablero(f, c);
+                if (datos && !datos.config.historial[datos.f][datos.c] && obtenerPiezaEn(f + dir*2, c) === P.VACIO) {
+                    movimientos.push({f: f + dir*2, c: c});
+                }
+            }
+            [[dir, 1], [dir, -1]].forEach(([df, dc]) => {
+                const target = obtenerPiezaEn(f+df, c+dc);
+                if (target && target!==P.ROCA && target!==P.VACIO && !esPiezaDelTurno(target, turnoPieza)) movimientos.push({f:f+df, c:c+dc});
+                if (enPassantTarget && f+df === enPassantTarget.f && c+dc === enPassantTarget.c) movimientos.push({f:f+df, c:c+dc, esEnPassant: true});
+            });
+        }
+        return movimientos;
+    }
+
+    function esCasillaAtacada(f, c, bandoAtacante) {
+        for(let i=0; i<11; i++) {
+            for(let j=0; j<11; j++) {
+                const p = obtenerPiezaEn(i, j);
+                if(p && esPiezaDelTurno(p, bandoAtacante)) {
+                    if(obtenerMovimientosBase(p, i, j).some(m => m.f === f && m.c === c)) return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    function encontrarRey(bando) {
+        const rey = bando === 'BLANCAS' ? P.BLANCAS.R : P.NEGRAS.R;
+        for(let i=0; i<11; i++) for(let j=0; j<11; j++) if(obtenerPiezaEn(i, j) === rey) return {f: i, c: j};
+        return null;
+    }
+
+    function obtenerMovimientosLegales(pieza, f, c) {
+        const base = obtenerMovimientosBase(pieza, f, c);
+        const turno = esPiezaDelTurno(pieza, 'BLANCAS') ? 'BLANCAS' : 'NEGRAS';
+        const enemigo = turno === 'BLANCAS' ? 'NEGRAS' : 'BLANCAS';
+        const validos = [];
+
+        base.forEach(m => {
+            const dOrigen = accederDatosTablero(f, c);
+            const dDestino = accederDatosTablero(m.f, m.c);
+            if(dDestino && !dDestino.isVoid) {
+                const pDestino = dDestino.config.piezas[dDestino.f][dDestino.c];
+                dOrigen.config.piezas[dOrigen.f][dOrigen.c] = P.VACIO;
+                dDestino.config.piezas[dDestino.f][dDestino.c] = pieza;
+                
+                const posRey = ([P.BLANCAS.R, P.NEGRAS.R].includes(pieza)) ? {f: m.f, c: m.c} : encontrarRey(turno);
+                if(posRey && !esCasillaAtacada(posRey.f, posRey.c, enemigo)) validos.push(m);
+                
+                dOrigen.config.piezas[dOrigen.f][dOrigen.c] = pieza;
+                dDestino.config.piezas[dDestino.f][dDestino.c] = pDestino;
+            }
+        });
+        return validos;
+    }
+
+    function tieneMovimientosLegales(bando) {
+        for (let f = 0; f < TAMANO_TABLERO; f++) {
+            for (let c = 0; c < TAMANO_TABLERO; c++) {
+                const p = obtenerPiezaEn(f, c);
+                if (p && esPiezaDelTurno(p, bando)) {
+                    const movimientos = obtenerMovimientosLegales(p, f, c);
+                    if (movimientos.length > 0) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function ejecutarMovimientoFisico(fOri, cOri, fDest, cDest, pieza) {
+        const dO = accederDatosTablero(fOri, cOri);
+        const dD = accederDatosTablero(fDest, cDest);
+        if(dD && !dD.isVoid) {
+            dD.config.piezas[dD.f][dD.c] = pieza;
+            dO.config.piezas[dO.f][dO.c] = P.VACIO;
+            dD.config.historial[dD.f][dD.c] = true; dO.config.historial[dO.f][dO.c] = false;
+            
+            ultimoMovimiento = { fOri, cOri, fDest, cDest }; // Guardar último movimiento
+
+            if([P.BLANCAS.P, P.NEGRAS.P].includes(pieza) && Math.abs(fDest - fOri) === 2) 
+                enPassantTarget = { f: (fOri + fDest)/2, c: cOri };
+            else enPassantTarget = null;
+        }
+    }
+
+    function avanzarMoneda() {
+        posicionMoneda--;
+        let evento = false;
+        if(posicionMoneda < 0) { posicionMoneda = 2; evento = true; }
+        dibujarTracker();
+        return evento;
+    }
+
+    function continuarFinTurno(esRemoto = false) {
+        const eventoActivado = avanzarMoneda();
+        seleccion = null; actualizarUbicacionReyes(); verificarFinDeJuego();
+        if(juegoTerminado) return;
+
+        if(eventoActivado) {
+            if(!esRemoto && turnoActual === miColor) dispararEventoCarta(turnoActual);
+        } else {
+            turnoActual = turnoActual === 'BLANCAS' ? 'NEGRAS' : 'BLANCAS';
+            actualizarTurnoUI(); 
+            verificarFinDeJuego();
+        }
+        crearTablero();
+    }
+
+    function verificarFinDeJuego() {
+        if(juegoTerminado) return;
+
+        const reyB = encontrarRey('BLANCAS');
+        const reyN = encontrarRey('NEGRAS');
+
+        if(!reyB) return declararVictoria('NEGRAS', 'El Rey Blanco ha sido eliminado.');
+        if(!reyN) return declararVictoria('BLANCAS', 'El Rey Negro ha sido eliminado.');
+
+        const posReyActual = encontrarRey(turnoActual);
+        if (posReyActual) {
+            const bandoEnemigo = turnoActual === 'BLANCAS' ? 'NEGRAS' : 'BLANCAS';
+            const estaEnJaque = esCasillaAtacada(posReyActual.f, posReyActual.c, bandoEnemigo);
+            
+            if (estaEnJaque) {
+                const tieneSalida = tieneMovimientosLegales(turnoActual);
+                if (!tieneSalida) {
+                    return declararVictoria(bandoEnemigo, 'JAQUE MATE');
+                }
+            }
+        }
+    }
+
+    function declararVictoria(ganador, motivo) {
+        juegoTerminado = true;
+        document.getElementById('texto-victoria').innerText = `¡${ganador} GANAN!`;
+        document.getElementById('subtitulo-victoria').innerText = motivo;
+        overlayGameOver.classList.remove('oculto');
+    }
+
+    function verificarPromocion(pieza, f, c) {
+        const d = accederDatosTablero(f, c);
+        if(!d || d.isVoid) return false;
+        const tableroInfo = estadoTableros.find(t => t.id === d.idTablero);
+        if (pieza === P.BLANCAS.P && d.f === 0 && tableroInfo.r <= 2) return true;
+        if (pieza === P.NEGRAS.P && d.f === 2 && tableroInfo.r >= 6) return true;
+        return false;
+    }
+
+    function verificarPromocionesGlobales(esRemoto = false) {
+        colaPromociones = []; 
+        for (let t of estadoTableros) {
+            const config = CONFIGURACION_TABLEROS[t.id];
+            for (let r = 0; r < 3; r++) {
+                for (let c = 0; c < 3; c++) {
+                    const pieza = config.piezas[r][c];
+                    if (!pieza) continue;
+                    const filaAbsoluta = t.r + r;
+                    const colAbsoluta = t.c + c;
+                    if (pieza === P.BLANCAS.P && r === 0 && t.r <= 2) {
+                        colaPromociones.push({ f: filaAbsoluta, c: colAbsoluta, pieza: pieza });
+                    }
+                    else if (pieza === P.NEGRAS.P && r === 2 && t.r >= 6) {
+                        colaPromociones.push({ f: filaAbsoluta, c: colAbsoluta, pieza: pieza });
+                    }
+                }
+            }
+        }
+        if (colaPromociones.length > 0) {
+            if (!esRemoto && turnoActual === miColor) {
+                procesarSiguientePromocion();
+            }
+            return true; 
+        }
+        return false;
+    }
+
+    function procesarSiguientePromocion() {
+        if (colaPromociones.length === 0) {
+            promocionDesdeEvento = true; 
+            finalizarEvento(false);
+            return;
+        }
+        const siguiente = colaPromociones[0];
+        promocionPendiente = { f: siguiente.f, c: siguiente.c };
+        iniciarPromocion(siguiente.f, siguiente.c);
+    }
+
+    function iniciarPromocion(f, c) {
+        promocionPendiente = {f, c};
+        contenedorOpcionesPromo.innerHTML = '';
+        const opts = (turnoActual === 'BLANCAS') ? [P.BLANCAS.D, P.BLANCAS.T, P.BLANCAS.A, P.BLANCAS.C] : [P.NEGRAS.D, P.NEGRAS.T, P.NEGRAS.A, P.NEGRAS.C];
+        opts.forEach(p => {
+            const btn = document.createElement('div');
+            btn.className = 'btn-promo';
+            btn.style.backgroundImage = `url('${obtenerUrlPieza(p)}')`;
+            if(turnoActual === miColor) btn.onclick = () => realizarPromocion(p);
+            contenedorOpcionesPromo.appendChild(btn);
+        });
+        overlayPromocion.classList.remove('oculto');
+    }
+
+    function realizarPromocion(nuevaPieza, esRemoto = false) {
+        if(!esRemoto && turnoActual === miColor) enviarDatos('PROMOTE', { ...promocionPendiente, pieza: nuevaPieza });
+        const {f, c} = promocionPendiente;
+        const d = accederDatosTablero(f, c);
+        if(d) d.config.piezas[d.f][d.c] = nuevaPieza;
+        overlayPromocion.classList.add('oculto'); promocionPendiente = null;
+        if (colaPromociones.length > 0) {
+            colaPromociones.shift();
+            if (colaPromociones.length > 0) {
+                if(!esRemoto) setTimeout(() => procesarSiguientePromocion(), 200);
+                crearTablero();
+                return;
+            }
+        }
+        if(promocionDesdeEvento) { promocionDesdeEvento = false; finalizarEvento(esRemoto); }
+        else continuarFinTurno(esRemoto);
+    }
+
+    function dispararEventoCarta(jugador) {
+        jugadorEvento = jugador; tableroVoidID = null;
+        let pool = [];
+        if(deckState.SLIDE > 0) pool.push('SLIDE'); if(deckState.SWAP > 0) pool.push('SWAP');
+        if(deckState.SPIN > 0) pool.push('SPIN'); if(deckState.VOID > 0) pool.push('VOID');
+        let reset = false;
+        if(pool.length === 0) { 
+            deckState = {SLIDE:3, SWAP:3, SPIN:3, VOID:1}; 
+            pool = ['SLIDE','SWAP','SPIN','VOID']; 
+            mostrarMensaje("BARAJA REINICIADA"); 
+            reset = true;
+        }
+        const ev = pool[Math.floor(Math.random() * pool.length)];
+        enviarDatos('CARD_EVENT', { jugador, evento: ev, resetDeck: reset });
+        deckState[ev]--; actualizarUIDeck(); mostrarCartaForzada(jugador, ev);
+    }
+
+    function cerrarEventoYActivarModo() {
+        overlayEvento.classList.add('oculto');
+        if(jugadorEvento === miColor) reiniciarSeleccion();
+    }
+    
+    function reiniciarSeleccion() {
+        seleccionSlide = null; seleccionSpin = null; seleccionSwap1 = null;
+        ['slide','spin','swap','void'].forEach(id => document.getElementById(`controles-${id}`).classList.add('oculto'));
+        if(eventoPendiente === 'SLIDE') { modoJuego='EVENTO_SLIDE'; mostrarMensaje("Selecciona tablero para deslizar"); }
+        else if(eventoPendiente === 'SWAP') { modoJuego='EVENTO_SWAP_1'; mostrarMensaje("Selecciona primer tablero"); }
+        else if(eventoPendiente === 'SPIN') { modoJuego='EVENTO_SPIN'; mostrarMensaje("Selecciona tablero para rotar"); }
+        else if(eventoPendiente === 'VOID') { modoJuego='EVENTO_VOID'; mostrarMensaje("Selecciona tablero para anular"); }
+        crearTablero();
+    }
+    
+    function finalizarEvento(esRemoto = false) {
+        modoJuego = 'NORMAL'; eventoPendiente = null;
+        ['slide','spin','swap','void'].forEach(id => document.getElementById(`controles-${id}`).classList.add('oculto'));
+        overlayEvento.classList.add('oculto');
+        crearTablero();
+        promocionDesdeEvento = true; 
+        const hayPromociones = verificarPromocionesGlobales(esRemoto);
+        if (hayPromociones) return; 
+        promocionDesdeEvento = false; 
+        turnoActual = turnoActual === 'BLANCAS' ? 'NEGRAS' : 'BLANCAS';
+        actualizarTurnoUI(); actualizarUbicacionReyes(); calcularVecinos(); verificarFinDeJuego(); crearTablero();
+    }
+    
+    function calcularVecinos() {
+        for(let i=0; i<9; i++) vecinosTableros[i] = []; 
+        for (let tA of estadoTableros) {
+            for (let tB of estadoTableros) {
+                if (tA.id === tB.id) continue;
+                const touchHoriz = (Math.abs(tA.c - tB.c) === 3) && (Math.abs(tA.r - tB.r) < 3);
+                const touchVert = (Math.abs(tA.r - tB.r) === 3) && (Math.abs(tA.c - tB.c) < 3);
+                if (touchHoriz || touchVert) {
+                    vecinosTableros[tA.id].push(tB.id);
+                }
+            }
+        }
+    }
+
+    function manejarClicSwap(idTablero) {
+        if (modoJuego === 'EVENTO_SWAP_2' && seleccionSwap1 === idTablero) {
+            reiniciarSeleccion(); 
+            return; 
+        }
+
+        const enemigo = (jugadorEvento === 'BLANCAS') ? 'NEGRAS' : 'BLANCAS';
+        if (tablerosConRey[idTablero].includes(enemigo)) { mostrarMensaje(`¡INVÁLIDO! Hay Rey Enemigo.`, true); return; }
+        
+        if (modoJuego === 'EVENTO_SWAP_1') {
+            seleccionSwap1 = idTablero; 
+            modoJuego = 'EVENTO_SWAP_2'; 
+            mostrarMensaje("Elige tablero vecino."); 
+            controlesSwap.classList.remove('oculto'); 
+            crearTablero(); 
+        } else if (modoJuego === 'EVENTO_SWAP_2') {
+            const id1 = seleccionSwap1; const id2 = idTablero;
+            if (!vecinosTableros[id1].includes(id2)) {
+                mostrarMensaje("¡No son vecinos!", true); 
+                return;
+            }
+            ejecutarSwap(id1, id2);
+        }
+    }
+
+    function manejarClic(f, c) {
+        if(juegoTerminado) return;
+        if (animando) return; // Bloqueo de clics durante animación
+        
+        const datos = accederDatosTablero(f, c);
+        
+        if(eventoPendiente && jugadorEvento !== miColor) return;
+        if(!eventoPendiente && turnoActual !== miColor) {
+            // Permitir clicar piezas enemigas para ver movimientos (amenazas)
+            const pieza = obtenerPiezaEn(f, c);
+            if (pieza) seleccionPieza(f, c, pieza);
+            return;
+        }
+
+        // --- GESTIÓN DE EVENTOS ---
+        if (eventoPendiente && jugadorEvento === miColor) {
+            if (modoJuego === 'EVENTO_SLIDE') { 
+                if(datos && !datos.isVoid) {
+                    if(seleccionSlide === datos.idTablero) reiniciarSeleccion();
+                    else prepararSlide(f, c); 
+                }
+                return; 
+            }
+            if (modoJuego === 'EVENTO_SPIN') { 
+                if(datos) {
+                    if(seleccionSpin === datos.idTablero) reiniciarSeleccion();
+                    else prepararSpin(datos.idTablero); 
+                }
+                return; 
+            }
+            if (modoJuego === 'EVENTO_VOID') { 
+                if(datos) manejarClicVoid(datos.idTablero); 
+                return; 
+            }
+            if (modoJuego.startsWith('EVENTO_SWAP')) {
+                if(datos) manejarClicSwap(datos.idTablero);
+                return;
+            }
+            return; 
+        }
+
+        // --- GESTIÓN DE MOVIMIENTO DE PIEZAS ---
+        const pieza = obtenerPiezaEn(f, c);
+        
+        if(seleccion) {
+            if (seleccion.fila === f && seleccion.col === c) {
+                seleccion = null; crearTablero(); return;
+            }
+
+            const esMiTurno = (turnoActual === miColor);
+            const esMiPieza = esPiezaDelTurno(seleccion.pieza, miColor);
+
+            const mov = seleccion.movimientos.find(m => m.f === f && m.c === c);
+            
+            if(mov && esMiTurno && esMiPieza) {
+                enviarDatos('MOVE', { fOri: seleccion.fila, cOri: seleccion.col, fDest: f, cDest: c, pieza: seleccion.pieza });
+                if(mov.esEnPassant) { const dV = accederDatosTablero(seleccion.fila, c); dV.config.piezas[dV.f][dV.c] = P.VACIO; }
+                
+                animarMovimiento(seleccion.fila, seleccion.col, f, c, () => {
+                    ejecutarMovimientoFisico(seleccion.fila, seleccion.col, f, c, seleccion.pieza);
+                    if(verificarPromocion(seleccion.pieza, f, c)) { 
+                        iniciarPromocion(f, c); 
+                        seleccion = null; 
+                        crearTablero(); 
+                        return; 
+                    }
+                    continuarFinTurno();
+                });
+                return;
+            }
+            
+            if(pieza) { 
+                seleccionPieza(f, c, pieza); 
+                return; 
+            }
+            
+            seleccion = null; crearTablero(); return;
+        }
+        
+        if(pieza) seleccionPieza(f, c, pieza);
+    }
+
+    function seleccionPieza(f, c, p) { 
+        seleccion = {
+            fila: f, 
+            col: c, 
+            pieza: p, 
+            movimientos: obtenerMovimientosLegales(p, f, c)
+        }; 
+        crearTablero(); 
+    }
+
+    function prepararSlide(f, c) { const d=accederDatosTablero(f,c); if(d) { seleccionSlide=d.idTablero; controlesSlide.classList.remove('oculto'); crearTablero(); } }
+    function prepararSpin(id) { seleccionSpin = id; controlesSpin.classList.remove('oculto'); crearTablero(); }
+    function mostrarMensaje(t, error=false) { 
+        mensajeSistema.innerText=t; 
+        mensajeSistema.style.background = error ? 'red' : 'crimson';
+        mensajeSistema.style.display='block'; 
+        setTimeout(()=>mensajeSistema.style.display='none', 3000); 
+    }
+    function actualizarUbicacionReyes() {
+        tablerosConRey = Array(9).fill(null).map(()=>[]);
+        for(let t of estadoTableros) {
+            const c = CONFIGURACION_TABLEROS[t.id];
+            for(let row of c.piezas) for(let p of row) if(p===P.BLANCAS.R) tablerosConRey[t.id].push('BLANCAS'); else if(p===P.NEGRAS.R) tablerosConRey[t.id].push('NEGRAS');
+        }
+    }
+    
+    function toggleOverlayEvento() {
+        if(overlayEvento.classList.contains('oculto')) {
+            overlayEvento.classList.remove('oculto');
+            notificacionMin.style.display = 'none';
+        } else {
+            overlayEvento.classList.add('oculto');
+            notificacionMin.style.display = 'block';
+        }
+    }
+
+    function mostrarCartaForzada(jugador, evento) {
+        eventoPendiente = evento;
+        jugadorEvento = jugador;
+        
+        visualCarta.style.backgroundImage = `url('${ASSETS.sheetEventos}')`; 
+        visualCarta.className = 'visual-carta'; 
+        visualCarta.classList.add(`sprite-${evento.toLowerCase()}`);
+
+        overlayEvento.classList.remove('oculto');
+        notificacionMin.style.display = 'none';
+
+        if (jugador === miColor) {
+            btnUsarCarta.disabled = false; btnUsarCarta.innerText = "ACTIVAR CARTA"; btnUsarCarta.style.opacity = "1";
+            btnMinimizar.classList.add('oculto'); 
+        } else {
+            btnUsarCarta.disabled = true; btnUsarCarta.innerText = "ESPERANDO OPONENTE..."; btnUsarCarta.style.opacity = "0.5";
+            btnMinimizar.classList.remove('oculto'); 
+        }
+    }
+
+    </script>
+</body>
+</html>
